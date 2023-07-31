@@ -21,14 +21,14 @@ os.environ['AWS_SECRET_ACCESS_KEY'] = config['AWS']['AWS_SECRET_ACCESS_KEY']
 
 
 def create_spark_session():
-    spark = SparkSession.builder.appName('my_awesome')\
+    spark = SparkSession.builder.appName('udacity_capstone_project')\
         .config('spark.jars.packages', 'saurfang:spark-sas7bdat:3.0.0-s_2.12')\
         .getOrCreate()
     return spark
 
 
 def process_immigration_data(spark, input_data, output_data, file_name, temperature_file, mapping_file):
-    """Process the immigration data input file and creates fact table and calendar, visa_type and country dimension tables.
+    """Process the immigration data input file and creates dimension table and calendar, visa_type and country dimension tables.
 
     Parameters:
     -----------
@@ -53,12 +53,6 @@ def process_immigration_data(spark, input_data, output_data, file_name, temperat
 
     # create calendar dimension table
     calendar_df = etl_functions.create_immigration_calendar_dimension(immigration_df, output_data)
-
-    # get global temperatures data
-    temp_df = process_global_land_temperatures(spark, input_data, temperature_file)
-
-    # create country dimension table
-    dim_df = etl_functions.create_country_dimension_table(spark, immigration_df, temp_df, output_data, mapping_file)
 
     # create immigration fact table
     fact_df = etl_functions.create_immigration_fact_table(spark, immigration_df, output_data)
@@ -87,28 +81,28 @@ def process_demographics_data(spark, input_data, output_data, file_name):
 
 
 def process_passanger_data(spark, input_data, output_data, file_name):
-    """Process the demographics data and create the usa_demographics_dim table
+    """Process the passanger flight data and create the usa_passanger dimension table
 
     Parameters:
     -----------
     spark (SparkSession): spark session instance
     input_data (string): input file path
     output_data (string): output file path
-    file_name (string): usa demographics csv file name
+    file_name (string): passanger csv file name
     """
 
-    # load demographics data
+    # load passanger data
     file = input_data + file_name
-    demographics_df = spark.read.csv(file, inferSchema=True, header=True, sep=';')
+    passanger_df = spark.read.csv(file, header=True, inferSchema=True)
 
-    # clean demographics data
-    new_demographics_df = transform.clean_spark_demographics_data(demographics_df)
+    # clean passanger data
+    new_passanger_df = transform.clean_spark_passanger_flight(passanger_df)
 
-    # create demographic dimension table
-    df = etl_functions.create_demographics_dimension_table(new_demographics_df, output_data)
+    # create passanger flight table
+    new_passanger_df = etl_functions.create_passanger_dimension_table(new_passanger_df, output_data)
 
 
-def process_global_land_temperatures(spark, input_data, file_name):
+def process_temperature_data(spark, input_data, output_data, file_name):
     """Process the global land temperatures data and return a dataframe
 
     Parameters:
@@ -124,25 +118,28 @@ def process_global_land_temperatures(spark, input_data, file_name):
     # clean the temperature data
     new_temperature_df = transform.clean_spark_temperature_data(temperature_df)
 
-    return new_temperature_df
+    # create temperature table
+    new_temperature_df = etl_functions.create_temperature_dimension_table(new_temperature_df, output_data)
 
 
 def main():
     spark = create_spark_session()
-    input_data = "/Users/lairdhiles/Documents/Udacity/capstone-project/"
-    output_data = "/Users/lairdhiles/Documents/Udacity/capstone-project/processed/"
+    input_data = "/Users/lairdhiles/Documents/Udacity/capstone-project/raw/"
+    output_data = "/Users/lairdhiles/Documents/Capstone-2/processed/"
 
     immigration_file_name = 'i94_apr16_sub.sas7bdat'
     temperature_file_name = 'GlobalLandTemperaturesByCity.csv'
     usa_demographics_file_name = 'us-cities-demographics.csv'
     passanger_flight_file_name = 'International_Report_Passengers.csv'
-
     mapping_file = input_data + "i94res.csv"
+
     # load the i94res to country mapping data
     mapping_file = spark.read.csv(mapping_file, header=True, inferSchema=True)
 
     process_immigration_data(spark, input_data, output_data, immigration_file_name, temperature_file_name, mapping_file)
     process_demographics_data(spark, input_data, output_data, usa_demographics_file_name)
+    process_passanger_data(spark, input_data, output_data, passanger_flight_file_name)
+    process_temperature_data(spark, input_data, output_data, temperature_file_name)
 
 
 if __name__ == "__main__":

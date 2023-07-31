@@ -1,0 +1,17 @@
+sudo yum install -y hadoop-mapreduce
+
+yarn jar /usr/lib/hadoop-mapreduce/hadoop-distcp.jar \
+s3://capstone-project07/etl.py \
+hdfs:///home/hadoop
+
+
+spark-submit --packages saurfang:spark-sas7bdat:2.0.0-s_2.10 etl.py
+
+
+spark-submit --deploy-mode cluster --py-files /etl.py --packages saurfang:spark-sas7bdat:2.0.0-s_2.10 s3://capstone-project07/etl.py
+
+spark-submit --deploy-mode cluster --py-files s3://capstone-project07/etl.py --packages saurfang:spark-sas7bdat:2.0.0-s_2.10 etl.py
+
+aws emr describe-step --cluster-id j-GW80L9ZDWUKD --step-id <s-1XXXXXXXXXXA>							
+
+

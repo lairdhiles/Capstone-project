@@ -32,18 +32,28 @@ def show_percentage_missing(df):
     
     nan_count_df.show()
 
+def clean_spark_passanger_flight(df):
+    """Clean passanger_flight dataframe
 
-def aggregate_temperature_data(df):
-    """Aggregate clean temperature data at country level
-    
-    :param df: spark dataframe of clean global temperaturs data
-    :return: spark dataframe consisting of countries average temperatures
+    :param df: spark dataframe with monthly immigration data
+    :return: clean dataframe
     """
-    new_df = df.select(['Country', 'AverageTemperature']).groupby('Country').avg()
+    total_records = df.count()
     
-    new_df = new_df.withColumnRenamed('avg(AverageTemperature)', 'average_temperature')
+    print(f'Total records in dataframe: {total_records:,}')
     
-    return new_df
+    # EDA has shown these columns to exhibit over 90% missing values, and hence we drop them
+    drop_columns = ['Year', 'Month', 'Total']
+    df = df.drop(*drop_columns)
+    
+    # drop rows where all elements are missing
+    df = df.dropna(how='all')
+
+    new_total_records = df.count()
+    
+    print(f'Total records after cleaning: {new_total_records:,}')
+    
+    return df
 
 
 def clean_spark_immigration_data(df):
@@ -82,15 +92,18 @@ def clean_spark_temperature_data(df):
     
     # drop rows with missing average temperature
     df = df.dropna(subset=['AverageTemperature'])
+
+    # drop rows with missing values
+    new_df = df.dropna(subset='AverageTemperatureUncertainty')
     
-    total_recs_after_dropping_nas = df.count()
+    total_recs_after_dropping_nas = new_df.count()
     print('Total records after dropping rows with missing values: {:,}'.format(total_records-total_recs_after_dropping_nas))
     
     # drop duplicate rows
-    df = df.drop_duplicates(subset=['dt', 'City', 'Country'])
+    new_df = new_df.drop_duplicates(subset=['dt', 'City', 'Country'])
     print('Rows dropped after accounting for duplicates: {:,}'.format(total_recs_after_dropping_nas-df.count()))
     
-    return df
+    return new_df
 
 def clean_spark_demographics_data(df):
     """Clean the US demographics dataset

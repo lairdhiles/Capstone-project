@@ -10,7 +10,6 @@ from pyspark.sql.functions import isnan, when, count, col, udf, dayofmonth, dayo
 from pyspark.sql.functions import monotonically_increasing_id
 from pyspark.sql.types import *
 
-from transform import aggregate_temperature_data
 
 def create_immigration_fact_table(spark, df, output_data):
     """This function creates an country dimension from the immigration and global land temperatures data.
@@ -21,6 +20,12 @@ def create_immigration_fact_table(spark, df, output_data):
     :param output_data: path to write dimension dataframe to
     :return: spark dataframe representing calendar dimension
     """
+
+    # rename columns to align with data model
+    df = df.withColumnRenamed('ccid', 'record_id') \
+        .withColumnRenamed('i94res', 'country_residence_code') \
+        .withColumnRenamed('i94addr', 'state_code')
+
     # get visa_type dimension
     dim_df = get_visa_type_dimension(spark, output_data)
 
@@ -30,35 +35,36 @@ def create_immigration_fact_table(spark, df, output_data):
     # create a udf to convert arrival date in SAS format to datetime object
     get_datetime = udf(lambda x: (dt.datetime(1960, 1, 1).date() + dt.timedelta(x)).isoformat() if x else None)
 
+    # write dimension to parquet file
+    df.write.parquet(output_data + "Immigration Fact", mode="overwrite")
+
+    return immigration_df
+
+
+def create_passanger_dimension_table(df, output_data):
+    """This function creates an passanger flight fact table from the passanger flights data.
+
+    :param spark: spark session
+    :param df: spark dataframe of immigration events
+    :param visa_type_df: spark dataframe of passanger flight data.
+    :param output_data: path to write dimension dataframe to
+    :return: spark dataframe representing passanger dimension table.
+    """
+    
     # rename columns to align with data model
-    df = df.withColumnRenamed('ccid', 'record_id') \
-        .withColumnRenamed('i94res', 'country_residence_code') \
-        .withColumnRenamed('i94addr', 'state_code')
-
-    # create an immigration view
-    df.createOrReplaceTempView("immigration_view")
-
-    # create visa_type key
-    df = spark.sql(
-        """
-        SELECT 
-            immigration_view.*, 
-            visa_view.visa_type_key
-        FROM immigration_view
-        LEFT JOIN visa_view ON visa_view.visatype=immigration_view.visatype
-        """
-    )
-
-    # convert arrival date into datetime object
-    df = df.withColumn("arrdate", get_datetime(df.arrdate))
-
-    # drop visatype key
-    df = df.drop(df.visatype)
+    passanger_df = df.withColumnRenamed('data_dte', 'flight_date') \
+        .withColumnRenamed('fg_apt_id', 'us_airport_Code') \
+        .withColumnRenamed('fg_wac', 'foreign_airport_code') \
+        .withColumnRenamed('carrier', 'air_carrier_code') \
+        .withColumnRenamed('type', 'flight_type')
+    
+  # create an id field in passanger_df
+    passanger_df = passanger_df.withColumn('flight_key', monotonically_increasing_id())
 
     # write dimension to parquet file
-    df.write.parquet(output_data + "immigration_fact", mode="overwrite")
+    passanger_df.write.parquet(output_data + "Flight Dim", mode="overwrite")
 
-    return df
+    return passanger_df
 
 
 def create_demographics_dimension_table(df, output_data):
@@ -76,11 +82,12 @@ def create_demographics_dimension_table(df, output_data):
         .withColumnRenamed('Foreign-born', 'foreign_born') \
         .withColumnRenamed('Average Household Size', 'average_household_size') \
         .withColumnRenamed('State Code', 'state_code')
+    
     # lets add an id column
     dim_df = dim_df.withColumn('id', monotonically_increasing_id())
 
     # write dimension to parquet file
-    dim_df.write.parquet(output_data + "demographics", mode="overwrite")
+    dim_df.write.parquet(output_data + "Demographics Dim", mode="overwrite")
 
     return dim_df
 
@@ -108,57 +115,25 @@ def get_visa_type_dimension(spark, output_data):
     return spark.read.parquet(output_data + "visatype")
 
 
-def create_country_dimension_table(spark, df, temp_df, output_data, mapping_file):
-    """This function creates a country dimension from the immigration and global land temperatures data.
+def create_temperature_dimension_table(df, output_data):
+    """This function creates a temperature dimension table from the temperature data.
 
-    :param spark: spark session object
+    :param spark: spark session
     :param df: spark dataframe of immigration events
-    :temp_df: spark dataframe of global land temperatures data.
     :param output_data: path to write dimension dataframe to
-    :param mapping_file: csv file that maps country codes to country names
-    :return: spark dataframe representing calendar dimension
+    :return: spark dataframe representing temperature dimension table.
     """
-    # create temporary view for immigration data
-    df.createOrReplaceTempView("immigration_view")
+    
+    # rename columns to align with data model
+    temperature_df = df.withColumnRenamed('dt', 'date') \
+    
+    # add an id column    
+    temperature_df = temperature_df.withColumn('date', monotonically_increasing_id())
 
-    # create temporary view for countries codes data
-    mapping_file.createOrReplaceTempView("country_codes_view")
+    # write dimension to parquet file
+    temperature_df.write.parquet(output_data + "temperature", mode="overwrite")
 
-    # get the aggregated temperature data
-    agg_temp = aggregate_temperature_data(temp_df)
-    # create temporary view for countries average temps data
-    agg_temp.createOrReplaceTempView("average_temperature_view")
-
-    # create country dimension using SQL
-    country_df = spark.sql(
-        """
-        SELECT 
-            i94res as country_code,
-            Name as country_name
-        FROM immigration_view
-        LEFT JOIN country_codes_view
-        ON immigration_view.i94res=country_codes_view.code
-        """
-    ).distinct()
-    # create temp country view
-    country_df.createOrReplaceTempView("country_view")
-
-    country_df = spark.sql(
-        """
-        SELECT 
-            country_code,
-            country_name,
-            average_temperature
-        FROM country_view
-        LEFT JOIN average_temperature_view
-        ON country_view.country_name=average_temperature_view.Country
-        """
-    ).distinct()
-
-    # write the dimension to a parquet file
-    country_df.write.parquet(output_data + "country", mode="overwrite")
-
-    return country_df
+    return temperature_df
 
 
 def create_immigration_calendar_dimension(df, output_data):
@@ -186,7 +161,7 @@ def create_immigration_calendar_dimension(df, output_data):
 
     # write the calendar dimension to parquet file
     partition_columns = ['arrival_year', 'arrival_month', 'arrival_week']
-    calendar_df.write.parquet(output_data + "immigration_calendar", partitionBy=partition_columns, mode="overwrite")
+    calendar_df.write.parquet(output_data + "Time Dim", partitionBy=partition_columns, mode="overwrite")
 
     return calendar_df
 
